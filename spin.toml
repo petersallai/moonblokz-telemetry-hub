@@ -10,7 +10,14 @@ description = "Moonblokz Telemetry Hub - a central application to collect teleme
 route = "/..."
 component = "moonblokz-telemetry-hub"
 
+
+[variables]
+api_key = { required = true }
+
 [component.moonblokz-telemetry-hub]
-source = "target/wasm32-wasi/release/moonblokz-telemetry-hub.wasm"
+source = "target/wasm32-wasip2/release/moonblokz_telemetry_hub.wasm"
 [component.moonblokz-telemetry-hub.build]
-command = "cargo build --target wasm32-wasi --release"
+command = "cargo build --target wasm32-wasip2 --release"
+
+[component.moonblokz-telemetry-hub.variables]
+api_key = "{{ api_key }}"
