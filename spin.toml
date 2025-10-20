@@ -1,0 +1,16 @@
+spin_manifest_version = 2
+
+[application]
+name = "moonblokz-telemetry-hub"
+version = "0.1.0"
+authors = ["Peter Sallai (Bad Access)<peter.sallai@badaccess.eu>"]
+description = "Moonblokz Telemetry Hub - a central application to collect telemetry data from Moonblokz Test Stations."
+
+[[trigger.http]]
+route = "/..."
+component = "moonblokz-telemetry-hub"
+
+[component.moonblokz-telemetry-hub]
+source = "target/wasm32-wasi/release/moonblokz-telemetry-hub.wasm"
+[component.moonblokz-telemetry-hub.build]
+command = "cargo build --target wasm32-wasi --release"
