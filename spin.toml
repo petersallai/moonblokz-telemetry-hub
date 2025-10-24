@@ -17,6 +17,7 @@ log_collector_api_key = { required = true }
 cli_api_key = { required = true }
 delete_timeout = { default = "30" }
 default_upload_interval = { default = "300" }
+loglevel = { default = "info" }
 
 [component.moonblokz-telemetry-hub]
 source = "target/wasm32-wasip2/release/moonblokz_telemetry_hub.wasm"
@@ -33,3 +34,4 @@ log_collector_api_key = "{{ log_collector_api_key }}"
 cli_api_key = "{{ cli_api_key }}"
 delete_timeout = "{{ delete_timeout }}"
 default_upload_interval = "{{ default_upload_interval }}"
+loglevel = "{{ loglevel }}"

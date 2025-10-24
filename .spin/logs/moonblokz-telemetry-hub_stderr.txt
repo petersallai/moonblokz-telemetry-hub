@@ -1,0 +1,1 @@
+Handler returned an error: Error::Provider("no provider resolved required variable \"log_collector_api_key\"")

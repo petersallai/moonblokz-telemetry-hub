@@ -8,6 +8,7 @@ use spin_sdk::{
     sqlite::{Connection, Value},
     variables,
 };
+use simple_logger::SimpleLogger;
 
 const DEFAULT_DELETE_TIMEOUT_MINUTES: i64 = 30;
 const DEFAULT_UPLOAD_INTERVAL_SECONDS: i64 = 300;
@@ -82,13 +83,14 @@ fn init_database(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn insert_log_messages(conn: &Connection, node_id: i64, logs: &[LogEntry]) -> Result<()> {
+fn insert_log_messages(conn: &Connection, node_id: u32, logs: &[LogEntry]) -> Result<()> {
     for log in logs {
-        conn.execute(
+        log::debug!("Inserting log message for node_id {}: {}", node_id, log.message);
+        _ = conn.execute(
             "INSERT INTO log_messages (timestamp, node_id, message) VALUES (?, ?, ?)",
             &[
                 Value::Text(log.timestamp.clone()),
-                Value::Integer(node_id),
+                Value::Integer(node_id as i64),
                 Value::Text(log.message.clone()),
             ],
         )?;
@@ -96,10 +98,10 @@ fn insert_log_messages(conn: &Connection, node_id: i64, logs: &[LogEntry]) -> Re
     Ok(())
 }
 
-fn get_and_delete_commands(conn: &Connection, node_id: i64) -> Result<Vec<Command>> {
+fn get_and_delete_commands(conn: &Connection, node_id: u32) -> Result<Vec<Command>> {
     let result = conn.execute(
         "SELECT id, command FROM commands WHERE node_id = ? ORDER BY id",
-        &[Value::Integer(node_id)],
+        &[Value::Integer(node_id as i64)],
     )?;
 
     let mut commands = Vec::new();
@@ -114,7 +116,7 @@ fn get_and_delete_commands(conn: &Connection, node_id: i64) -> Result<Vec<Comman
     // Delete the commands
     conn.execute(
         "DELETE FROM commands WHERE node_id = ?",
-        &[Value::Integer(node_id)],
+        &[Value::Integer(node_id as i64)],
     )?;
 
     Ok(commands)
@@ -145,6 +147,8 @@ fn get_logs_for_download(
     let cutoff_time = Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
     let cutoff_str = cutoff_time.to_rfc3339();
 
+    log::debug!("Fetching logs for download: last_id={}, cutoff_time={}, current_time={}", last_id, cutoff_str, Utc::now().to_rfc3339());
+
     let result = conn.execute(
         "SELECT id, timestamp, node_id, message FROM log_messages 
          WHERE id > ? AND timestamp < ?
@@ -155,6 +159,8 @@ fn get_logs_for_download(
             Value::Integer(MAX_LOG_ITEMS_PER_DOWNLOAD),
         ],
     )?;
+
+    log::debug!("Fetched {} logs for download.", result.rows().count());
 
     let mut logs = Vec::new();
     for row in result.rows() {
@@ -273,13 +279,16 @@ fn handle_update(req: Request) -> Result<Response> {
         .header("x-node-id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("Missing X-Node-ID header"))?;
-    let node_id: i64 = node_id_str
+    let node_id: u32 = node_id_str
         .parse()
         .map_err(|_| anyhow!("Invalid node ID"))?;
 
     // Parse request body
     let body = req.body();
     let upload_req: ProbeUploadRequest = serde_json::from_slice(body)?;
+
+    log::debug!("Received upload request. Node_id: {}, uploaded logline count: {}", node_id, upload_req.logs.len());
+
 
     // Open database and initialize
     let conn = Connection::open_default()?;
@@ -444,10 +453,35 @@ fn handle_command(req: Request) -> Result<Response> {
 
 #[http_component]
 fn handle_request(req: Request) -> Result<impl IntoResponse> {
-    let path = req.uri();
-    let method = req.method();
+    // Get log level from configuration and initialize logger
+    let loglevel = variables::get("loglevel").unwrap_or_else(|_| "info".to_string());
+    let log_level = match loglevel.to_lowercase().as_str() {
+        "trace" => log::LevelFilter::Trace,
+        "debug" => log::LevelFilter::Debug,
+        "info" => log::LevelFilter::Info,
+        "warn" => log::LevelFilter::Warn,
+        "error" => log::LevelFilter::Error,
+        _ => log::LevelFilter::Info,
+    };
+    let _ = SimpleLogger::new().with_level(log_level).init();
+    
 
-    match (method, path) {
+    // Parse request URI and method
+    let uri = req.uri();
+    
+    // Extract path: remove domain/scheme if present, then remove query string
+    let path = uri
+        .split("://")
+        .last()
+        .unwrap_or(uri)
+        .split('/')
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("/");
+    let path = format!("/{}", path.split('?').next().unwrap_or(&path));
+    let method = req.method();
+    
+    match (method, path.as_str()) {
         (&spin_sdk::http::Method::Post, "/update") => handle_update(req),
         (&spin_sdk::http::Method::Get, path) if path.starts_with("/download") => handle_download(req),
         (&spin_sdk::http::Method::Post, "/command") => handle_command(req),
