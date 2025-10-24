@@ -12,12 +12,24 @@ component = "moonblokz-telemetry-hub"
 
 
 [variables]
-api_key = { required = true }
+probe_api_key = { required = true }
+log_collector_api_key = { required = true }
+cli_api_key = { required = true }
+delete_timeout = { default = "30" }
+default_upload_interval = { default = "300" }
 
 [component.moonblokz-telemetry-hub]
 source = "target/wasm32-wasip2/release/moonblokz_telemetry_hub.wasm"
+allowed_outbound_hosts = []
+key_value_stores = ["default"]
+sqlite_databases = ["default"]
+
 [component.moonblokz-telemetry-hub.build]
 command = "cargo build --target wasm32-wasip2 --release"
 
 [component.moonblokz-telemetry-hub.variables]
-api_key = "{{ api_key }}"
+probe_api_key = "{{ probe_api_key }}"
+log_collector_api_key = "{{ log_collector_api_key }}"
+cli_api_key = "{{ cli_api_key }}"
+delete_timeout = "{{ delete_timeout }}"
+default_upload_interval = "{{ default_upload_interval }}"

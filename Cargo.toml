@@ -2,7 +2,7 @@
 name = "moonblokz-telemetry-hub"
 authors = ["Peter Sallai (Bad Access)<peter.sallai@badaccess.eu>"]
 description = "Moonblokz Telemetry Hub - a central application to collect telemetry data from Moonblokz Test Stations."
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [lib]
@@ -12,5 +12,8 @@ crate-type = [ "cdylib" ]
 anyhow = "1"
 http = "1.1.0"
 spin-sdk = "3.0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = "0.4"
 
 [workspace]
