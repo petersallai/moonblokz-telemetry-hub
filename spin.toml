@@ -2,7 +2,7 @@ spin_manifest_version = 2
 
 [application]
 name = "moonblokz-telemetry-hub"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Peter Sallai (Bad Access)<peter.sallai@badaccess.eu>"]
 description = "Moonblokz Telemetry Hub - a central application to collect telemetry data from Moonblokz Test Stations."
 
