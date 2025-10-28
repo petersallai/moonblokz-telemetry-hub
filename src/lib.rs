@@ -70,6 +70,12 @@ fn init_database(conn: &Connection) -> Result<()> {
         &[],
     )?;
 
+    // Create index on timestamp for efficient sorting and filtering
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_log_messages_timestamp ON log_messages(timestamp)",
+        &[],
+    )?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS commands (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,7 +158,7 @@ fn get_logs_for_download(
     let result = conn.execute(
         "SELECT id, timestamp, node_id, message FROM log_messages 
          WHERE id > ? AND timestamp < ?
-         ORDER BY id ASC LIMIT ?",
+         ORDER BY timestamp ASC, id ASC LIMIT ?",
         &[
             Value::Integer(last_id),
             Value::Text(cutoff_str),
@@ -481,6 +487,8 @@ fn handle_request(req: Request) -> Result<impl IntoResponse> {
     let path = format!("/{}", path.split('?').next().unwrap_or(&path));
     let method = req.method();
     
+    log::debug!("Received request: method={}, path={}", method, path);
+
     match (method, path.as_str()) {
         (&spin_sdk::http::Method::Post, "/update") => handle_update(req),
         (&spin_sdk::http::Method::Get, path) if path.starts_with("/download") => handle_download(req),
