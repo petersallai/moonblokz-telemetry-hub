@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use simple_logger::SimpleLogger;
 use spin_sdk::{
     http::{IntoResponse, Request, Response},
     http_component,
@@ -8,8 +9,8 @@ use spin_sdk::{
     sqlite::{Connection, Value},
     variables,
 };
-use simple_logger::SimpleLogger;
 
+const DEFAULT_CLEANUP_INTERVAL_MINUTES: i64 = 5;
 const DEFAULT_DELETE_TIMEOUT_MINUTES: i64 = 30;
 const DEFAULT_UPLOAD_INTERVAL_SECONDS: i64 = 300;
 const MAX_LOG_ITEMS_PER_DOWNLOAD: i64 = 10000;
@@ -71,10 +72,7 @@ fn init_database(conn: &Connection) -> Result<()> {
     )?;
 
     // Create index on timestamp for efficient sorting and filtering
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_log_messages_timestamp ON log_messages(timestamp)",
-        &[],
-    )?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_log_messages_timestamp ON log_messages(timestamp)", &[])?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS commands (
@@ -109,7 +107,6 @@ fn get_and_delete_commands(conn: &Connection, node_id: u32) -> Result<Vec<Comman
         "SELECT id, command FROM commands WHERE node_id = ? ORDER BY id",
         &[Value::Integer(node_id as i64)],
     )?;
-
     let mut commands = Vec::new();
     for row in result.rows() {
         if let Some(command_json) = row.get::<&str>("command") {
@@ -120,50 +117,65 @@ fn get_and_delete_commands(conn: &Connection, node_id: u32) -> Result<Vec<Comman
     }
 
     // Delete the commands
-    conn.execute(
-        "DELETE FROM commands WHERE node_id = ?",
-        &[Value::Integer(node_id as i64)],
-    )?;
+    conn.execute("DELETE FROM commands WHERE node_id = ?", &[Value::Integer(node_id as i64)])?;
 
     Ok(commands)
 }
 
 fn cleanup_old_data(conn: &Connection, delete_timeout_minutes: i64) -> Result<()> {
+    log::debug!("Cleaning up old data older than {} minutes.", delete_timeout_minutes);
     let cutoff_time = Utc::now() - chrono::Duration::minutes(delete_timeout_minutes);
     let cutoff_str = cutoff_time.to_rfc3339();
 
     conn.execute(
-        "DELETE FROM log_messages WHERE timestamp < ?",
+        "DELETE FROM log_messages WHERE id IN (SELECT id FROM log_messages WHERE timestamp < ? LIMIT 10000)",
         &[Value::Text(cutoff_str.clone())],
     )?;
 
+    // Count remaining log messages
+    let log_count_result = conn.execute("SELECT COUNT(*) as count FROM log_messages", &[])?;
+    if let Some(row) = log_count_result.rows().next() {
+        if let Some(count) = row.get::<i64>("count") {
+            if count > 0 {
+                log::debug!("Remaining log messages after cleanup: {}", count);
+            }
+        }
+    }
+
     conn.execute(
-        "DELETE FROM commands WHERE timestamp < ?",
+        "DELETE FROM commands WHERE id IN (SELECT id FROM commands WHERE timestamp < ? LIMIT 10000)",
         &[Value::Text(cutoff_str)],
     )?;
+
+    // Count remaining commands
+    let cmd_count_result = conn.execute("SELECT COUNT(*) as count FROM commands", &[])?;
+    if let Some(row) = cmd_count_result.rows().next() {
+        if let Some(count) = row.get::<i64>("count") {
+            if count > 0 {
+                log::debug!("Remaining commands after cleanup: {}", count);
+            }
+        }
+    }
 
     Ok(())
 }
 
-fn get_logs_for_download(
-    conn: &Connection,
-    last_id: i64,
-    max_upload_interval: i64,
-) -> Result<Vec<DownloadLogEntry>> {
+fn get_logs_for_download(conn: &Connection, last_id: i64, max_upload_interval: i64) -> Result<Vec<DownloadLogEntry>> {
     let cutoff_time = Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
     let cutoff_str = cutoff_time.to_rfc3339();
 
-    log::debug!("Fetching logs for download: last_id={}, cutoff_time={}, current_time={}", last_id, cutoff_str, Utc::now().to_rfc3339());
+    log::debug!(
+        "Fetching logs for download: last_id={}, cutoff_time={}, current_time={}",
+        last_id,
+        cutoff_str,
+        Utc::now().to_rfc3339()
+    );
 
     let result = conn.execute(
         "SELECT id, timestamp, node_id, message FROM log_messages 
          WHERE id > ? AND timestamp < ?
          ORDER BY timestamp ASC, id ASC LIMIT ?",
-        &[
-            Value::Integer(last_id),
-            Value::Text(cutoff_str),
-            Value::Integer(MAX_LOG_ITEMS_PER_DOWNLOAD),
-        ],
+        &[Value::Integer(last_id), Value::Text(cutoff_str), Value::Integer(MAX_LOG_ITEMS_PER_DOWNLOAD)],
     )?;
 
     log::debug!("Fetched {} logs for download.", result.rows().count());
@@ -174,7 +186,7 @@ fn get_logs_for_download(
         let timestamp = row.get::<&str>("timestamp");
         let node_id = row.get::<i64>("node_id");
         let message = row.get::<&str>("message");
-        
+
         if let (Some(id), Some(timestamp), Some(node_id), Some(message)) = (id, timestamp, node_id, message) {
             logs.push(DownloadLogEntry {
                 item_id: id,
@@ -192,20 +204,13 @@ fn insert_command(conn: &Connection, node_id: i64, command_json: &str) -> Result
     let timestamp = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO commands (timestamp, node_id, command) VALUES (?, ?, ?)",
-        &[
-            Value::Text(timestamp),
-            Value::Integer(node_id),
-            Value::Text(command_json.to_string()),
-        ],
+        &[Value::Text(timestamp), Value::Integer(node_id), Value::Text(command_json.to_string())],
     )?;
     Ok(())
 }
 
 fn get_all_node_ids(conn: &Connection) -> Result<Vec<i64>> {
-    let result = conn.execute(
-        "SELECT DISTINCT node_id FROM log_messages ORDER BY node_id",
-        &[],
-    )?;
+    let result = conn.execute("SELECT DISTINCT node_id FROM log_messages ORDER BY node_id", &[])?;
 
     let mut node_ids = Vec::new();
     for row in result.rows() {
@@ -221,21 +226,21 @@ fn get_all_node_ids(conn: &Connection) -> Result<Vec<i64>> {
 // Key-Value Store Operations
 // ============================================================================
 
-fn should_cleanup(store: &Store, delete_timeout_minutes: i64) -> Result<bool> {
-    match store.get("last_delete_time") {
+fn should_cleanup(store: &Store, cleanup_interval_minutes: i64) -> Result<bool> {
+    match store.get("last_cleanup_time") {
         Ok(Some(bytes)) => {
-            let last_delete_str = String::from_utf8(bytes)?;
-            let last_delete: DateTime<Utc> = last_delete_str.parse()?;
+            let last_cleanup_str = String::from_utf8(bytes)?;
+            let last_cleanup: DateTime<Utc> = last_cleanup_str.parse()?;
             let now = Utc::now();
-            Ok((now - last_delete).num_minutes() > delete_timeout_minutes)
+            Ok((now - last_cleanup).num_minutes() >= cleanup_interval_minutes)
         }
         _ => Ok(true),
     }
 }
 
-fn update_last_delete_time(store: &Store) -> Result<()> {
+fn update_last_cleanup_time(store: &Store) -> Result<()> {
     let now = Utc::now().to_rfc3339();
-    store.set("last_delete_time", now.as_bytes())?;
+    store.set("last_cleanup_time", now.as_bytes())?;
     Ok(())
 }
 
@@ -274,10 +279,7 @@ fn handle_update(req: Request) -> Result<Response> {
         .ok_or_else(|| anyhow!("Missing X-Api-Key header"))?;
 
     if api_key_header != probe_api_key {
-        return Ok(Response::builder()
-            .status(401)
-            .body("Unauthorized")
-            .build());
+        return Ok(Response::builder().status(401).body("Unauthorized").build());
     }
 
     // Get node ID
@@ -285,16 +287,17 @@ fn handle_update(req: Request) -> Result<Response> {
         .header("x-node-id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("Missing X-Node-ID header"))?;
-    let node_id: u32 = node_id_str
-        .parse()
-        .map_err(|_| anyhow!("Invalid node ID"))?;
+    let node_id: u32 = node_id_str.parse().map_err(|_| anyhow!("Invalid node ID"))?;
 
     // Parse request body
     let body = req.body();
     let upload_req: ProbeUploadRequest = serde_json::from_slice(body)?;
 
-    log::debug!("Received upload request. Node_id: {}, uploaded logline count: {}", node_id, upload_req.logs.len());
-
+    log::debug!(
+        "Received upload request. Node_id: {}, uploaded logline count: {}",
+        node_id,
+        upload_req.logs.len()
+    );
 
     // Open database and initialize
     let conn = Connection::open_default()?;
@@ -305,14 +308,18 @@ fn handle_update(req: Request) -> Result<Response> {
 
     // Check if cleanup is needed
     let store = Store::open_default()?;
-    let delete_timeout = variables::get("delete_timeout")
+    let cleanup_interval = variables::get("cleanup_interval_minutes")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_CLEANUP_INTERVAL_MINUTES);
+    let delete_timeout = variables::get("delete_timeout_minutes")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_TIMEOUT_MINUTES);
 
-    if should_cleanup(&store, delete_timeout)? {
+    if should_cleanup(&store, cleanup_interval)? {
         cleanup_old_data(&conn, delete_timeout)?;
-        update_last_delete_time(&store)?;
+        update_last_cleanup_time(&store)?;
     }
 
     // Get and delete commands for this node
@@ -336,10 +343,7 @@ fn handle_download(req: Request) -> Result<Response> {
         .ok_or_else(|| anyhow!("Missing X-Api-Key header"))?;
 
     if api_key_header != log_collector_api_key {
-        return Ok(Response::builder()
-            .status(401)
-            .body("Unauthorized")
-            .build());
+        return Ok(Response::builder().status(401).body("Unauthorized").build());
     }
 
     // Parse query parameter
@@ -374,6 +378,22 @@ fn handle_download(req: Request) -> Result<Response> {
     // Get logs
     let logs = get_logs_for_download(&conn, last_id, max_upload_interval)?;
 
+    // Check if cleanup is needed
+    let store = Store::open_default()?;
+    let cleanup_interval = variables::get("cleanup_interval_minutes")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_CLEANUP_INTERVAL_MINUTES);
+    let delete_timeout = variables::get("delete_timeout_minutes")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_DELETE_TIMEOUT_MINUTES);
+
+    if should_cleanup(&store, cleanup_interval)? {
+        cleanup_old_data(&conn, delete_timeout)?;
+        update_last_cleanup_time(&store)?;
+    }
+
     // Return logs as JSON
     let response = DownloadResponse { logs };
     let response_body = serde_json::to_string(&response)?;
@@ -393,10 +413,7 @@ fn handle_command(req: Request) -> Result<Response> {
         .ok_or_else(|| anyhow!("Missing X-Api-Key header"))?;
 
     if api_key_header != cli_api_key {
-        return Ok(Response::builder()
-            .status(401)
-            .body("Unauthorized")
-            .build());
+        return Ok(Response::builder().status(401).body("Unauthorized").build());
     }
 
     // Parse request body
@@ -438,7 +455,7 @@ fn handle_command(req: Request) -> Result<Response> {
             // Extract active_period and inactive_period to determine max interval
             let active_period = params.get("active_period").and_then(|v| v.as_i64());
             let inactive_period = params.get("inactive_period").and_then(|v| v.as_i64());
-            
+
             if let (Some(active), Some(inactive)) = (active_period, inactive_period) {
                 let max_interval = active.max(inactive);
                 let store = Store::open_default()?;
@@ -447,10 +464,7 @@ fn handle_command(req: Request) -> Result<Response> {
         }
     }
 
-    Ok(Response::builder()
-        .status(200)
-        .body("OK")
-        .build())
+    Ok(Response::builder().status(200).body("OK").build())
 }
 
 // ============================================================================
@@ -470,32 +484,21 @@ fn handle_request(req: Request) -> Result<impl IntoResponse> {
         _ => log::LevelFilter::Info,
     };
     let _ = SimpleLogger::new().with_level(log_level).init();
-    
 
     // Parse request URI and method
     let uri = req.uri();
-    
+
     // Extract path: remove domain/scheme if present, then remove query string
-    let path = uri
-        .split("://")
-        .last()
-        .unwrap_or(uri)
-        .split('/')
-        .skip(1)
-        .collect::<Vec<_>>()
-        .join("/");
+    let path = uri.split("://").last().unwrap_or(uri).split('/').skip(1).collect::<Vec<_>>().join("/");
     let path = format!("/{}", path.split('?').next().unwrap_or(&path));
     let method = req.method();
-    
+
     log::debug!("Received request: method={}, path={}", method, path);
 
     match (method, path.as_str()) {
         (&spin_sdk::http::Method::Post, "/update") => handle_update(req),
         (&spin_sdk::http::Method::Get, path) if path.starts_with("/download") => handle_download(req),
         (&spin_sdk::http::Method::Post, "/command") => handle_command(req),
-        _ => Ok(Response::builder()
-            .status(404)
-            .body("Not Found")
-            .build()),
+        _ => Ok(Response::builder().status(404).body("Not Found").build()),
     }
 }

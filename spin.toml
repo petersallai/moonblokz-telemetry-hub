@@ -15,7 +15,8 @@ component = "moonblokz-telemetry-hub"
 probe_api_key = { required = true }
 log_collector_api_key = { required = true }
 cli_api_key = { required = true }
-delete_timeout = { default = "30" }
+delete_timeout_minutes = { default = "60" }
+cleanup_interval_minutes = { default = "1" }
 default_upload_interval = { default = "300" }
 loglevel = { default = "info" }
 
@@ -32,6 +33,7 @@ command = "cargo build --target wasm32-wasip2 --release"
 probe_api_key = "{{ probe_api_key }}"
 log_collector_api_key = "{{ log_collector_api_key }}"
 cli_api_key = "{{ cli_api_key }}"
-delete_timeout = "{{ delete_timeout }}"
+delete_timeout_minutes = "{{ delete_timeout_minutes }}"
+cleanup_interval_minutes = "{{ cleanup_interval_minutes }}"
 default_upload_interval = "{{ default_upload_interval }}"
 loglevel = "{{ loglevel }}"
