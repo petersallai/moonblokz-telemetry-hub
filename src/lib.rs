@@ -56,6 +56,20 @@ struct CommandRequest {
     parameters: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Serialize)]
+struct UpdateResponse {
+    commands: Vec<Command>,
+    update_interval: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateIntervalConfig {
+    start_time: u64,
+    end_time: u64,
+    active_period: i64,
+    inactive_period: i64,
+}
+
 // ============================================================================
 // Database Operations
 // ============================================================================
@@ -244,26 +258,38 @@ fn update_last_cleanup_time(store: &Store) -> Result<()> {
     Ok(())
 }
 
-fn get_max_upload_interval(store: &Store, default: i64) -> i64 {
+fn save_update_interval_config(store: &Store, config: &UpdateIntervalConfig) -> Result<()> {
+    let json = serde_json::to_string(config)?;
+    store.set("update_interval_config", json.as_bytes())?;
+    Ok(())
+}
+
+fn get_update_interval_config(store: &Store) -> Option<UpdateIntervalConfig> {
     store
-        .get("max_upload_interval")
+        .get("update_interval_config")
         .ok()
         .and_then(|opt| opt)
         .and_then(|bytes| String::from_utf8(bytes).ok())
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(default)
+        .and_then(|s| serde_json::from_str(&s).ok())
 }
 
-fn update_max_upload_interval(store: &Store, new_interval: i64, is_global: bool) -> Result<()> {
-    if is_global {
-        store.set("max_upload_interval", new_interval.to_string().as_bytes())?;
-    } else {
-        let current = get_max_upload_interval(store, DEFAULT_UPLOAD_INTERVAL_SECONDS);
-        if new_interval > current {
-            store.set("max_upload_interval", new_interval.to_string().as_bytes())?;
+fn get_current_update_interval(store: &Store, default_interval: i64) -> i64 {
+    match get_update_interval_config(store) {
+        Some(config) => {
+            let now = Utc::now().timestamp() as u64;
+            if now >= config.start_time && now <= config.end_time {
+                log::debug!("In active period, using active_period: {}", config.active_period);
+                config.active_period
+            } else {
+                log::debug!("In inactive period, using inactive_period: {}", config.inactive_period);
+                config.inactive_period
+            }
+        }
+        None => {
+            log::debug!("No update interval config found, using default: {}", default_interval);
+            default_interval
         }
     }
-    Ok(())
 }
 
 // ============================================================================
@@ -325,8 +351,16 @@ fn handle_update(req: Request) -> Result<Response> {
     // Get and delete commands for this node
     let commands = get_and_delete_commands(&conn, node_id)?;
 
-    // Return commands as JSON
-    let response_body = serde_json::to_string(&commands)?;
+    // Get current update interval based on active/inactive period
+    let default_interval = variables::get("default_upload_interval")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_UPLOAD_INTERVAL_SECONDS);
+    let update_interval = get_current_update_interval(&store, default_interval);
+
+    // Return commands and update_interval as JSON
+    let response = UpdateResponse { commands, update_interval };
+    let response_body = serde_json::to_string(&response)?;
     Ok(Response::builder()
         .status(200)
         .header("content-type", "application/json")
@@ -367,16 +401,16 @@ fn handle_download(req: Request) -> Result<Response> {
     let conn = Connection::open_default()?;
     init_database(&conn)?;
 
-    // Get max upload interval
+    // Get current upload interval based on active/inactive period (same logic as /update)
     let store = Store::open_default()?;
     let default_interval = variables::get("default_upload_interval")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_UPLOAD_INTERVAL_SECONDS);
-    let max_upload_interval = get_max_upload_interval(&store, default_interval);
+    let current_upload_interval = get_current_update_interval(&store, default_interval);
 
-    // Get logs
-    let logs = get_logs_for_download(&conn, last_id, max_upload_interval)?;
+    // Get logs using the current interval for filtering
+    let logs = get_logs_for_download(&conn, last_id, current_upload_interval)?;
 
     // Check if cleanup is needed
     let store = Store::open_default()?;
@@ -420,7 +454,56 @@ fn handle_command(req: Request) -> Result<Response> {
     let body = req.body();
     let cmd_req: CommandRequest = serde_json::from_slice(body)?;
 
-    // Open database
+    // Handle set_update_interval specially - store in KV, don't forward to nodes
+    if cmd_req.command == "set_update_interval" {
+        if let Some(params) = &cmd_req.parameters {
+            // Parse start_time and end_time as ISO 8601 strings and convert to Unix timestamps
+            let start_time_str = params
+                .get("start_time")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("Missing start_time parameter"))?;
+            let end_time_str = params
+                .get("end_time")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("Missing end_time parameter"))?;
+            let active_period = params
+                .get("active_period")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow!("Missing active_period parameter"))?;
+            let inactive_period = params
+                .get("inactive_period")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow!("Missing inactive_period parameter"))?;
+
+            // Parse ISO 8601 timestamps to Unix timestamps
+            let start_time: DateTime<Utc> = start_time_str.parse().map_err(|_| anyhow!("Invalid start_time format, expected ISO 8601"))?;
+            let end_time: DateTime<Utc> = end_time_str.parse().map_err(|_| anyhow!("Invalid end_time format, expected ISO 8601"))?;
+
+            let config = UpdateIntervalConfig {
+                start_time: start_time.timestamp() as u64,
+                end_time: end_time.timestamp() as u64,
+                active_period,
+                inactive_period,
+            };
+
+            log::info!(
+                "Storing update interval config: start={}, end={}, active={}, inactive={}",
+                config.start_time,
+                config.end_time,
+                config.active_period,
+                config.inactive_period
+            );
+
+            let store = Store::open_default()?;
+            save_update_interval_config(&store, &config)?;
+
+            return Ok(Response::builder().status(200).body("OK").build());
+        } else {
+            return Ok(Response::builder().status(400).body("Missing parameters for set_update_interval").build());
+        }
+    }
+
+    // Open database for other commands
     let conn = Connection::open_default()?;
     init_database(&conn)?;
 
@@ -446,21 +529,6 @@ fn handle_command(req: Request) -> Result<Response> {
         let node_ids = get_all_node_ids(&conn)?;
         for node_id in node_ids {
             insert_command(&conn, node_id, &command_json)?;
-        }
-    }
-
-    // Update max_upload_interval if needed
-    if cmd_req.command == "set_update_interval" {
-        if let Some(params) = &cmd_req.parameters {
-            // Extract active_period and inactive_period to determine max interval
-            let active_period = params.get("active_period").and_then(|v| v.as_i64());
-            let inactive_period = params.get("inactive_period").and_then(|v| v.as_i64());
-
-            if let (Some(active), Some(inactive)) = (active_period, inactive_period) {
-                let max_interval = active.max(inactive);
-                let store = Store::open_default()?;
-                update_max_upload_interval(&store, max_interval, node_id_opt.is_none())?;
-            }
         }
     }
 

@@ -69,20 +69,23 @@ Probes use this endpoint to upload log batches and retrieve pending commands.
 
 **Success (200 OK):**
 ```json
-[
-  {
-    "command": "set_log_level",
-    "parameters": {
-      "log_level": "DEBUG"
+{
+  "commands": [
+    {
+      "command": "set_log_level",
+      "parameters": {
+        "log_level": "DEBUG"
+      }
+    },
+    {
+      "command": "update_node"
     }
-  },
-  {
-    "command": "update_node"
-  }
-]
+  ],
+  "update_interval": 60
+}
 ```
 
-Returns an array of pending commands for this node. Commands are deleted after retrieval.
+Returns pending commands for this node and the current upload interval in seconds. Commands are deleted after retrieval. The `update_interval` is determined by the global `set_update_interval` configuration - if current time is within the active period, `active_period` is returned; otherwise `inactive_period` is used.
 
 **Error Responses:**
 - `400 Bad Request` - Missing headers or malformed body
@@ -157,7 +160,7 @@ Log collectors use this endpoint to download accumulated logs.
   - `message` (string): Log message text
 
 **Notes:**
-- Only returns logs older than `max_upload_interval * 1.1` to ensure all probes have uploaded
+- Uses the current upload interval (active or inactive period based on configured time range) with a 1.1x safety margin to filter logs, ensuring all probes have uploaded
 - Limited to 10,000 entries per request
 - Empty array if no new logs available
 
@@ -222,19 +225,32 @@ OK
 
 #### set_update_interval
 
-Modify probe upload schedule.
+Configure global upload schedule based on active/inactive time periods. This command is stored centrally and NOT forwarded to nodes. Instead, probes receive the current `update_interval` value in their `/update` response.
+
+**Note:** This command does NOT accept a `node_id` parameter - it configures a global schedule.
 
 ```json
 {
   "command": "set_update_interval",
   "parameters": {
-    "node_id": 21,
     "start_time": "2025-10-24T08:00:00Z",
     "end_time": "2025-10-24T18:00:00Z",
     "active_period": 60,
     "inactive_period": 300
   }
 }
+```
+
+**Parameters:**
+- `start_time` (string, required): ISO 8601 UTC timestamp for active period start
+- `end_time` (string, required): ISO 8601 UTC timestamp for active period end
+- `active_period` (integer, required): Upload interval in seconds during active period
+- `inactive_period` (integer, required): Upload interval in seconds outside active period
+
+**Behavior:**
+- When current time is between `start_time` and `end_time`, probes receive `active_period` as their `update_interval`
+- Outside this window, probes receive `inactive_period`
+- The `/download` endpoint uses the same logic to filter logs appropriately
 ```
 
 #### set_log_level

@@ -86,23 +86,24 @@ fn handle_update(req: Request) -> Result<Response> {
 ### Key-Value Store Usage
 Used for **coordination state only**, not persistent data:
 - `last_cleanup_time` - Track when to run next cleanup (prevents every request triggering cleanup)
-- `max_upload_interval` - Track longest interval across all probes (for log download timing)
+- `update_interval_config` - JSON with `start_time`, `end_time` (Unix timestamps), `active_period`, `inactive_period`
 
 Pattern: `Store::open_default()?, store.get("key"), store.set("key", bytes)`
 
-### Command Broadcasting
-When `node_id` is **omitted** from command parameters, it broadcasts to **all known nodes**:
+### Update Interval Logic
+The `set_update_interval` command is handled specially - stored in KV, NOT forwarded to nodes:
 ```rust
-if let Some(node_id) = node_id_opt {
-    insert_command(&conn, node_id, &command_json)?;
-} else {
-    // Broadcast: get all distinct node_ids from log_messages
-    let node_ids = get_all_node_ids(&conn)?;
-    for node_id in node_ids {
-        insert_command(&conn, node_id, &command_json)?;
-    }
-}
+// Stored as UpdateIntervalConfig in KV
+let config = UpdateIntervalConfig {
+    start_time: start_time.timestamp() as u64,  // Unix timestamp
+    end_time: end_time.timestamp() as u64,
+    active_period,    // seconds
+    inactive_period,  // seconds
+};
+save_update_interval_config(&store, &config)?;
 ```
+
+Probes receive `update_interval` in their `/update` response based on whether current time is within the active window.
 
 ## Testing Strategy
 
