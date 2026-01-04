@@ -48,6 +48,7 @@ struct DownloadLogEntry {
 #[derive(Debug, Serialize)]
 struct DownloadResponse {
     logs: Vec<DownloadLogEntry>,
+    update_interval: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -428,8 +429,11 @@ fn handle_download(req: Request) -> Result<Response> {
         update_last_cleanup_time(&store)?;
     }
 
-    // Return logs as JSON
-    let response = DownloadResponse { logs };
+    // Return logs and update_interval as JSON
+    let response = DownloadResponse {
+        logs,
+        update_interval: current_upload_interval,
+    };
     let response_body = serde_json::to_string(&response)?;
     Ok(Response::builder()
         .status(200)
