@@ -103,7 +103,7 @@ fn init_database(conn: &Connection) -> Result<()> {
 
 fn insert_log_messages(conn: &Connection, node_id: u32, logs: &[LogEntry]) -> Result<()> {
     for log in logs {
-        log::debug!("Inserting log message for node_id {}: {}", node_id, log.message);
+        log::trace!("Inserting log message for node_id {}: {}", node_id, log.message);
         _ = conn.execute(
             "INSERT INTO log_messages (timestamp, node_id, message) VALUES (?, ?, ?)",
             &[
