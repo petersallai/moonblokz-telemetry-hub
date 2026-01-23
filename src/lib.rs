@@ -261,13 +261,13 @@ fn update_last_cleanup_time(store: &Store) -> Result<()> {
 
 fn save_update_interval_config(store: &Store, config: &UpdateIntervalConfig) -> Result<()> {
     let json = serde_json::to_string(config)?;
-    store.set("update_interval_config", json.as_bytes())?;
+    store.set("update_interval", json.as_bytes())?;
     Ok(())
 }
 
 fn get_update_interval_config(store: &Store) -> Option<UpdateIntervalConfig> {
     store
-        .get("update_interval_config")
+        .get("update_interval")
         .ok()
         .and_then(|opt| opt)
         .and_then(|bytes| String::from_utf8(bytes).ok())
