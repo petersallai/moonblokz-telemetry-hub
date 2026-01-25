@@ -335,11 +335,11 @@ fn handle_update(req: Request) -> Result<Response> {
 
     // Check if cleanup is needed
     let store = Store::open_default()?;
-    let cleanup_interval = variables::get("cleanup_interval_minutes")
+    let cleanup_interval = variables::get("cleanup_interval")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_CLEANUP_INTERVAL_MINUTES);
-    let delete_timeout = variables::get("delete_timeout_minutes")
+    let delete_timeout = variables::get("delete_timeout")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_TIMEOUT_MINUTES);
@@ -415,11 +415,11 @@ fn handle_download(req: Request) -> Result<Response> {
 
     // Check if cleanup is needed
     let store = Store::open_default()?;
-    let cleanup_interval = variables::get("cleanup_interval_minutes")
+    let cleanup_interval = variables::get("cleanup_interval")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_CLEANUP_INTERVAL_MINUTES);
-    let delete_timeout = variables::get("delete_timeout_minutes")
+    let delete_timeout = variables::get("delete_timeout")
         .ok()
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(DEFAULT_DELETE_TIMEOUT_MINUTES);
