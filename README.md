@@ -106,7 +106,7 @@ Log collectors download accumulated logs.
 - `X-Api-Key`: Must match `log_collector_api_key`
 
 **Query Parameters:**
-- `last_log_message_id`: Last processed log ID (use 0 for first request)
+- `last_log_timestamp`: ISO 8601 timestamp of the last downloaded log entry (use `1970-01-01T00:00:00Z` for first request)
 
 **Response:**
 ```json

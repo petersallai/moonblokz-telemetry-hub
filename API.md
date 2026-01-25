@@ -117,7 +117,7 @@ Log collectors use this endpoint to download accumulated logs.
 
 ### Request
 
-**URL:** `/download?last_log_message_id={id}`  
+**URL:** `/download?last_log_timestamp={timestamp}`  
 **Method:** `GET`
 
 **Headers:**
@@ -128,7 +128,7 @@ Log collectors use this endpoint to download accumulated logs.
 **Query Parameters:**
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| last_log_message_id | integer | Yes | ID of last processed log (0 for first request) |
+| last_log_timestamp | string | Yes | ISO 8601 timestamp of last processed log (use `1970-01-01T00:00:00Z` for first request) |
 
 ### Response
 
@@ -165,14 +165,14 @@ Log collectors use this endpoint to download accumulated logs.
 - Empty array if no new logs available
 
 **Error Responses:**
-- `400 Bad Request` - Missing or invalid `last_log_message_id`
+- `400 Bad Request` - Missing or invalid `last_log_timestamp`
 - `401 Unauthorized` - Invalid API key
 - `500 Internal Server Error` - Database or server error
 
 ### Example
 
 ```bash
-curl -X GET "https://hub.example.com/download?last_log_message_id=0" \
+curl -X GET "https://hub.example.com/download?last_log_timestamp=1970-01-01T00:00:00Z" \
   -H "X-Api-Key: your-collector-key"
 ```
 

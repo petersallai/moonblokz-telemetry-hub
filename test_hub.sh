@@ -69,7 +69,7 @@ echo ""
 # Test 4: Download logs
 echo "Test 4: Download logs via /download endpoint"
 # Note: This may return empty logs if they're too recent (within max_upload_interval)
-DOWNLOAD_RESPONSE=$(curl -s -X GET "$BASE_URL/download?last_log_message_id=0" \
+DOWNLOAD_RESPONSE=$(curl -s -X GET "$BASE_URL/download?last_log_timestamp=1970-01-01T00:00:00Z" \
   -H "X-Api-Key: $COLLECTOR_KEY")
 
 echo "Response: $DOWNLOAD_RESPONSE"

@@ -81,7 +81,7 @@ Expected response: `OK`
 ### Test the /download endpoint (log collector download)
 
 ```bash
-curl -X GET "http://127.0.0.1:3000/download?last_log_message_id=0" \
+curl -X GET "http://127.0.0.1:3000/download?last_log_timestamp=1970-01-01T00:00:00Z" \
   -H "X-Api-Key: collector-secret-key-123456789"
 ```
 

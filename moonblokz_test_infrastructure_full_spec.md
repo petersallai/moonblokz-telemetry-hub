@@ -406,23 +406,23 @@ and one for CLI clients to enqueue commands.
 
 * **Method:** `GET`
 * **Query parameters:**
-  * `last_log_message_id` – integer ID of the last log message that
-    the collector has already processed.  The parameter MUST be present;
-    the collector uses 0 for the first request.  Requests with
-    negative or non‑numeric values MUST receive `400 Bad Request`.
+  * `last_log_timestamp` – ISO 8601 timestamp of the last log entry that
+    the collector has already processed. The parameter MUST be present;
+    the collector uses `1970-01-01T00:00:00Z` for the first request.
+    Requests with invalid timestamps MUST receive `400 Bad Request`.
 * **Headers:**
   * `X‑Api‑Key: <log_collector_api_key>` – required.  Requests with an
     incorrect key MUST receive `401 Unauthorized`.
 * **Process:**
-  1. Validate API key and `last_log_message_id`.
+  1. Validate API key and `last_log_timestamp`.
   2. Look up `max_upload_interval` in the key‑value store (defaulting
      to `default_upload_interval`).  Compute `cutoff_time = now −
      max_upload_interval × 1.1`.  The factor of 1.1 introduces a
      safety margin for network delays.
-  3. Query `log_messages` for rows with `id > last_log_message_id` and
-     `timestamp < cutoff_time`, sorted by ascending `id`.  Limit the
-     number of rows returned (e.g. 10 000) to avoid excessively large
-     responses.
+  3. Query `log_messages` for rows with `timestamp > last_log_timestamp`
+     and `timestamp < cutoff_time`, sorted by ascending `timestamp`
+     (and `id` for tie‑breaking). Limit the number of rows returned
+     (e.g. 10 000) to avoid excessively large responses.
   4. Return a JSON object with a `logs` array.  Each entry includes
      `item_id` (database row ID), `timestamp` (string), `node_id` and
      `message`.
@@ -448,7 +448,7 @@ Example response:
 
 * **Errors:**
   * `401 Unauthorized` if API key is invalid.
-  * `400 Bad Request` if `last_log_message_id` is missing or invalid.
+  * `400 Bad Request` if `last_log_timestamp` is missing or invalid.
   * `500 Internal Server Error` on database or unexpected errors.
 
 #### 3. `/command` – CLI command submission
@@ -546,7 +546,7 @@ overridden via the `--config` command‑line option. Key settings include:
 The collector maintains a state variable `last_id` initialised to 0.
 Every `interval` seconds it performs the following steps:
 
-1. Construct the URL `${hub_url}/download?last_log_message_id=${last_id}`.
+1. Construct the URL `${hub_url}/download?last_log_timestamp=${last_timestamp}`.
 2. Send an HTTPS `GET` request with header `X‑Api‑Key: <api-key>`.
 3. On a `200 OK` response, parse the JSON body.  It MUST contain a
    `logs` array.  For each entry in the array, extract

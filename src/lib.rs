@@ -175,22 +175,31 @@ fn cleanup_old_data(conn: &Connection, delete_timeout_minutes: i64) -> Result<()
     Ok(())
 }
 
-fn get_logs_for_download(conn: &Connection, last_id: i64, max_upload_interval: i64) -> Result<Vec<DownloadLogEntry>> {
+fn get_logs_for_download(
+    conn: &Connection,
+    last_timestamp: DateTime<Utc>,
+    max_upload_interval: i64,
+) -> Result<Vec<DownloadLogEntry>> {
     let cutoff_time = Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
     let cutoff_str = cutoff_time.to_rfc3339();
+    let last_timestamp_str = last_timestamp.to_rfc3339();
 
     log::debug!(
-        "Fetching logs for download: last_id={}, cutoff_time={}, current_time={}",
-        last_id,
+        "Fetching logs for download: last_timestamp={}, cutoff_time={}, current_time={}",
+        last_timestamp_str,
         cutoff_str,
         Utc::now().to_rfc3339()
     );
 
     let result = conn.execute(
         "SELECT id, timestamp, node_id, message FROM log_messages 
-         WHERE id > ? AND timestamp < ?
+         WHERE timestamp > ? AND timestamp < ?
          ORDER BY timestamp ASC, id ASC LIMIT ?",
-        &[Value::Integer(last_id), Value::Text(cutoff_str), Value::Integer(MAX_LOG_ITEMS_PER_DOWNLOAD)],
+        &[
+            Value::Text(last_timestamp_str),
+            Value::Text(cutoff_str),
+            Value::Integer(MAX_LOG_ITEMS_PER_DOWNLOAD),
+        ],
     )?;
 
     log::debug!("Fetched {} logs for download.", result.rows().count());
@@ -293,6 +302,51 @@ fn get_current_update_interval(store: &Store, default_interval: i64) -> i64 {
     }
 }
 
+fn percent_decode(value: &str) -> Result<String> {
+    let bytes = value.as_bytes();
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                if i + 2 >= bytes.len() {
+                    return Err(anyhow!("Invalid percent-encoding in query parameter"));
+                }
+                let hex = &value[i + 1..i + 3];
+                let decoded = u8::from_str_radix(hex, 16)
+                    .map_err(|_| anyhow!("Invalid percent-encoding in query parameter"))?;
+                out.push(decoded as char);
+                i += 3;
+            }
+            b'+' => {
+                out.push(' ');
+                i += 1;
+            }
+            _ => {
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn get_query_param(uri: &str, key: &str) -> Result<Option<String>> {
+    let query = uri.splitn(2, '?').nth(1).unwrap_or("");
+    for pair in query.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let mut parts = pair.splitn(2, '=');
+        let k = parts.next().unwrap_or("");
+        let v = parts.next().unwrap_or("");
+        if k == key {
+            return Ok(Some(percent_decode(v)?));
+        }
+    }
+    Ok(None)
+}
+
 // ============================================================================
 // HTTP Handlers
 // ============================================================================
@@ -383,20 +437,11 @@ fn handle_download(req: Request) -> Result<Response> {
 
     // Parse query parameter
     let uri = req.uri().to_string();
-    let last_id = uri
-        .split("last_log_message_id=")
-        .nth(1)
-        .and_then(|s| s.split('&').next())
-        .ok_or_else(|| anyhow!("Missing last_log_message_id parameter"))?
-        .parse::<i64>()
-        .map_err(|_| anyhow!("Invalid last_log_message_id"))?;
-
-    if last_id < 0 {
-        return Ok(Response::builder()
-            .status(400)
-            .body("Invalid last_log_message_id: must be non-negative")
-            .build());
-    }
+    let last_timestamp_str = get_query_param(&uri, "last_log_timestamp")?
+        .ok_or_else(|| anyhow!("Missing last_log_timestamp parameter"))?;
+    let last_timestamp: DateTime<Utc> = last_timestamp_str
+        .parse()
+        .map_err(|_| anyhow!("Invalid last_log_timestamp: expected ISO 8601"))?;
 
     // Open database
     let conn = Connection::open_default()?;
@@ -411,7 +456,7 @@ fn handle_download(req: Request) -> Result<Response> {
     let current_upload_interval = get_current_update_interval(&store, default_interval);
 
     // Get logs using the current interval for filtering
-    let logs = get_logs_for_download(&conn, last_id, current_upload_interval)?;
+    let logs = get_logs_for_download(&conn, last_timestamp, current_upload_interval)?;
 
     // Check if cleanup is needed
     let store = Store::open_default()?;
