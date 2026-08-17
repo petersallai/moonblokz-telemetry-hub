@@ -31,10 +31,19 @@ This repo contains the Telemetry Hub for the MoonBlokz test infrastructure: a Sp
 
 ## Architecture & Related Context
 - The hub is one of four system components; the probe, log collector, and CLI are specified in `moonblokz_test_infrastructure_full_spec.md`.
-- The MoonBlokz series part VII/5 (“Field Testing Infrastructure”) explains why telemetry runs over a parallel WiFi network (out-of-band control) while LoRa stays dedicated to mesh traffic.
+- Part VII/2 (“Mesh Radio Algorithm”) describes a best-effort LoRa mesh optimized for decentralized operation, low traffic, and eventual consistency (not strict global ordering).
+- Node discovery uses lightweight echo-map exchanges and connection quality metrics so each node can infer local topology and relay usefulness.
+- Message forwarding is adaptive and priority-aware, and only larger payloads (`add_block` and `add_transaction`) are fragmented into chunks.
+- Part VII/3 (“Inside the Radio Module”) models the radio as async task loops (TX scheduler, RX, and processor) with bounded queues and duty-cycle aware transmission scheduling.
+- This architecture favors resilience over reliability guarantees: duplicate suppression, probabilistic relaying, and congestion-aware behavior are expected at the protocol layer.
+- Part VII/4 (“Radio Network Simulation”) uses a same-codebase simulator before field tests, including path-loss + collision modeling and per-link packet quality to evaluate relay behavior.
+- Part VII/5 (“Field Testing Infrastructure”) explains why telemetry runs over a parallel WiFi network (out-of-band control) while LoRa stays dedicated to mesh traffic.
 - Test Stations combine an RP2040 LoRa node with a Raspberry Pi Zero (USB-connected). The Probe uploads logs, executes commands, and handles OTA updates; the hub coordinates uploads, downloads, and command queues.
 - The hub delays log downloads to preserve timestamp ordering and manages `set_update_interval` rather than forwarding it to probes.
 
 ## Security & Configuration Tips
 - Use `.env` locally and Spin variables in deployment; do not commit secrets.
 - Keep API keys random (32+ bytes) and serve the hub over HTTPS in production.
+
+## Further References
+- Field Testing Infrastructure (Part VII/5): https://medium.com/moonblokz/moonblokz-series-part-vii-5-field-testing-infrastructure-6be10e18796c
