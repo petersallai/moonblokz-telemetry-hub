@@ -175,11 +175,7 @@ fn cleanup_old_data(conn: &Connection, delete_timeout_minutes: i64) -> Result<()
     Ok(())
 }
 
-fn get_logs_for_download(
-    conn: &Connection,
-    last_timestamp: DateTime<Utc>,
-    max_upload_interval: i64,
-) -> Result<Vec<DownloadLogEntry>> {
+fn get_logs_for_download(conn: &Connection, last_timestamp: DateTime<Utc>, max_upload_interval: i64) -> Result<Vec<DownloadLogEntry>> {
     let cutoff_time = Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
     let cutoff_str = cutoff_time.to_rfc3339();
     let last_timestamp_str = last_timestamp.to_rfc3339();
@@ -313,8 +309,7 @@ fn percent_decode(value: &str) -> Result<String> {
                     return Err(anyhow!("Invalid percent-encoding in query parameter"));
                 }
                 let hex = &value[i + 1..i + 3];
-                let decoded = u8::from_str_radix(hex, 16)
-                    .map_err(|_| anyhow!("Invalid percent-encoding in query parameter"))?;
+                let decoded = u8::from_str_radix(hex, 16).map_err(|_| anyhow!("Invalid percent-encoding in query parameter"))?;
                 out.push(decoded as char);
                 i += 3;
             }
@@ -437,8 +432,7 @@ fn handle_download(req: Request) -> Result<Response> {
 
     // Parse query parameter
     let uri = req.uri().to_string();
-    let last_timestamp_str = get_query_param(&uri, "last_log_timestamp")?
-        .ok_or_else(|| anyhow!("Missing last_log_timestamp parameter"))?;
+    let last_timestamp_str = get_query_param(&uri, "last_log_timestamp")?.ok_or_else(|| anyhow!("Missing last_log_timestamp parameter"))?;
     let last_timestamp: DateTime<Utc> = last_timestamp_str
         .parse()
         .map_err(|_| anyhow!("Invalid last_log_timestamp: expected ISO 8601"))?;
@@ -562,7 +556,7 @@ fn handle_command(req: Request) -> Result<Response> {
         parameters: cmd_req.parameters.clone(),
     };
     let command_json = serde_json::to_string(&command)?;
-
+    log::info!("Inserting command: {}", command_json);
     // Check if node_id is specified in parameters
     let node_id_opt = cmd_req
         .parameters
