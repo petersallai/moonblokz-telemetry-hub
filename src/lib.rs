@@ -87,7 +87,10 @@ fn init_database(conn: &Connection) -> Result<()> {
     )?;
 
     // Create index on timestamp for efficient sorting and filtering
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_log_messages_timestamp ON log_messages(timestamp)", &[])?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_log_messages_timestamp ON log_messages(timestamp)",
+        &[],
+    )?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS commands (
@@ -104,7 +107,11 @@ fn init_database(conn: &Connection) -> Result<()> {
 
 fn insert_log_messages(conn: &Connection, node_id: u32, logs: &[LogEntry]) -> Result<()> {
     for log in logs {
-        log::trace!("Inserting log message for node_id {}: {}", node_id, log.message);
+        log::trace!(
+            "Inserting log message for node_id {}: {}",
+            node_id,
+            log.message
+        );
         _ = conn.execute(
             "INSERT INTO log_messages (timestamp, node_id, message) VALUES (?, ?, ?)",
             &[
@@ -132,13 +139,19 @@ fn get_and_delete_commands(conn: &Connection, node_id: u32) -> Result<Vec<Comman
     }
 
     // Delete the commands
-    conn.execute("DELETE FROM commands WHERE node_id = ?", &[Value::Integer(node_id as i64)])?;
+    conn.execute(
+        "DELETE FROM commands WHERE node_id = ?",
+        &[Value::Integer(node_id as i64)],
+    )?;
 
     Ok(commands)
 }
 
 fn cleanup_old_data(conn: &Connection, delete_timeout_minutes: i64) -> Result<()> {
-    log::debug!("Cleaning up old data older than {} minutes.", delete_timeout_minutes);
+    log::debug!(
+        "Cleaning up old data older than {} minutes.",
+        delete_timeout_minutes
+    );
     let cutoff_time = Utc::now() - chrono::Duration::minutes(delete_timeout_minutes);
     let cutoff_str = cutoff_time.to_rfc3339();
 
@@ -175,8 +188,13 @@ fn cleanup_old_data(conn: &Connection, delete_timeout_minutes: i64) -> Result<()
     Ok(())
 }
 
-fn get_logs_for_download(conn: &Connection, last_timestamp: DateTime<Utc>, max_upload_interval: i64) -> Result<Vec<DownloadLogEntry>> {
-    let cutoff_time = Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
+fn get_logs_for_download(
+    conn: &Connection,
+    last_timestamp: DateTime<Utc>,
+    max_upload_interval: i64,
+) -> Result<Vec<DownloadLogEntry>> {
+    let cutoff_time =
+        Utc::now() - chrono::Duration::seconds((max_upload_interval as f64 * 1.1) as i64);
     let cutoff_str = cutoff_time.to_rfc3339();
     let last_timestamp_str = last_timestamp.to_rfc3339();
 
@@ -207,7 +225,9 @@ fn get_logs_for_download(conn: &Connection, last_timestamp: DateTime<Utc>, max_u
         let node_id = row.get::<i64>("node_id");
         let message = row.get::<&str>("message");
 
-        if let (Some(id), Some(timestamp), Some(node_id), Some(message)) = (id, timestamp, node_id, message) {
+        if let (Some(id), Some(timestamp), Some(node_id), Some(message)) =
+            (id, timestamp, node_id, message)
+        {
             logs.push(DownloadLogEntry {
                 item_id: id,
                 timestamp: timestamp.to_string(),
@@ -224,13 +244,20 @@ fn insert_command(conn: &Connection, node_id: i64, command_json: &str) -> Result
     let timestamp = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO commands (timestamp, node_id, command) VALUES (?, ?, ?)",
-        &[Value::Text(timestamp), Value::Integer(node_id), Value::Text(command_json.to_string())],
+        &[
+            Value::Text(timestamp),
+            Value::Integer(node_id),
+            Value::Text(command_json.to_string()),
+        ],
     )?;
     Ok(())
 }
 
 fn get_all_node_ids(conn: &Connection) -> Result<Vec<i64>> {
-    let result = conn.execute("SELECT DISTINCT node_id FROM log_messages ORDER BY node_id", &[])?;
+    let result = conn.execute(
+        "SELECT DISTINCT node_id FROM log_messages ORDER BY node_id",
+        &[],
+    )?;
 
     let mut node_ids = Vec::new();
     for row in result.rows() {
@@ -284,15 +311,24 @@ fn get_current_update_interval(store: &Store, default_interval: i64) -> i64 {
         Some(config) => {
             let now = Utc::now().timestamp() as u64;
             if now >= config.start_time && now <= config.end_time {
-                log::debug!("In active period, using active_period: {}", config.active_period);
+                log::debug!(
+                    "In active period, using active_period: {}",
+                    config.active_period
+                );
                 config.active_period
             } else {
-                log::debug!("In inactive period, using inactive_period: {}", config.inactive_period);
+                log::debug!(
+                    "In inactive period, using inactive_period: {}",
+                    config.inactive_period
+                );
                 config.inactive_period
             }
         }
         None => {
-            log::debug!("No update interval config found, using default: {}", default_interval);
+            log::debug!(
+                "No update interval config found, using default: {}",
+                default_interval
+            );
             default_interval
         }
     }
@@ -309,7 +345,8 @@ fn percent_decode(value: &str) -> Result<String> {
                     return Err(anyhow!("Invalid percent-encoding in query parameter"));
                 }
                 let hex = &value[i + 1..i + 3];
-                let decoded = u8::from_str_radix(hex, 16).map_err(|_| anyhow!("Invalid percent-encoding in query parameter"))?;
+                let decoded = u8::from_str_radix(hex, 16)
+                    .map_err(|_| anyhow!("Invalid percent-encoding in query parameter"))?;
                 out.push(decoded as char);
                 i += 3;
             }
@@ -363,7 +400,9 @@ fn handle_update(req: Request) -> Result<Response> {
         .header("x-node-id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow!("Missing X-Node-ID header"))?;
-    let node_id: u32 = node_id_str.parse().map_err(|_| anyhow!("Invalid node ID"))?;
+    let node_id: u32 = node_id_str
+        .parse()
+        .map_err(|_| anyhow!("Invalid node ID"))?;
 
     // Parse request body
     let body = req.body();
@@ -409,7 +448,10 @@ fn handle_update(req: Request) -> Result<Response> {
     let update_interval = get_current_update_interval(&store, default_interval);
 
     // Return commands and update_interval as JSON
-    let response = UpdateResponse { commands, update_interval };
+    let response = UpdateResponse {
+        commands,
+        update_interval,
+    };
     let response_body = serde_json::to_string(&response)?;
     Ok(Response::builder()
         .status(200)
@@ -432,7 +474,8 @@ fn handle_download(req: Request) -> Result<Response> {
 
     // Parse query parameter
     let uri = req.uri().to_string();
-    let last_timestamp_str = get_query_param(&uri, "last_log_timestamp")?.ok_or_else(|| anyhow!("Missing last_log_timestamp parameter"))?;
+    let last_timestamp_str = get_query_param(&uri, "last_log_timestamp")?
+        .ok_or_else(|| anyhow!("Missing last_log_timestamp parameter"))?;
     let last_timestamp: DateTime<Utc> = last_timestamp_str
         .parse()
         .map_err(|_| anyhow!("Invalid last_log_timestamp: expected ISO 8601"))?;
@@ -519,8 +562,12 @@ fn handle_command(req: Request) -> Result<Response> {
                 .ok_or_else(|| anyhow!("Missing inactive_period parameter"))?;
 
             // Parse ISO 8601 timestamps to Unix timestamps
-            let start_time: DateTime<Utc> = start_time_str.parse().map_err(|_| anyhow!("Invalid start_time format, expected ISO 8601"))?;
-            let end_time: DateTime<Utc> = end_time_str.parse().map_err(|_| anyhow!("Invalid end_time format, expected ISO 8601"))?;
+            let start_time: DateTime<Utc> = start_time_str
+                .parse()
+                .map_err(|_| anyhow!("Invalid start_time format, expected ISO 8601"))?;
+            let end_time: DateTime<Utc> = end_time_str
+                .parse()
+                .map_err(|_| anyhow!("Invalid end_time format, expected ISO 8601"))?;
 
             let config = UpdateIntervalConfig {
                 start_time: start_time.timestamp() as u64,
@@ -542,7 +589,10 @@ fn handle_command(req: Request) -> Result<Response> {
 
             return Ok(Response::builder().status(200).body("OK").build());
         } else {
-            return Ok(Response::builder().status(400).body("Missing parameters for set_update_interval").build());
+            return Ok(Response::builder()
+                .status(400)
+                .body("Missing parameters for set_update_interval")
+                .build());
         }
     }
 
@@ -600,7 +650,14 @@ fn handle_request(req: Request) -> Result<impl IntoResponse> {
     let uri = req.uri();
 
     // Extract path: remove domain/scheme if present, then remove query string
-    let path = uri.split("://").last().unwrap_or(uri).split('/').skip(1).collect::<Vec<_>>().join("/");
+    let path = uri
+        .split("://")
+        .last()
+        .unwrap_or(uri)
+        .split('/')
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join("/");
     let path = format!("/{}", path.split('?').next().unwrap_or(&path));
     let method = req.method();
 
@@ -608,7 +665,9 @@ fn handle_request(req: Request) -> Result<impl IntoResponse> {
 
     match (method, path.as_str()) {
         (&spin_sdk::http::Method::Post, "/update") => handle_update(req),
-        (&spin_sdk::http::Method::Get, path) if path.starts_with("/download") => handle_download(req),
+        (&spin_sdk::http::Method::Get, path) if path.starts_with("/download") => {
+            handle_download(req)
+        }
         (&spin_sdk::http::Method::Post, "/command") => handle_command(req),
         _ => Ok(Response::builder().status(404).body("Not Found").build()),
     }
